@@ -25,23 +25,28 @@ before work continues to the next part.
 - Status: complete; section parser and dependency-free BM25 retrieval are in
   `src/zentromart/knowledge.py`.
 
-## Part 3 — Structured data, tools, and conversation handling
+## Part 3 — Structured data, date rules, and guarded tools
 
 - Load CSVs with identifiers preserved as strings and documented joins.
 - Use the supplied identity-gated `lookup_order` and `create_ticket` tools.
-- Add multi-turn context, clarifying questions, one-retry verification, policy
-  refusals, and confirmed human handovers.
-- Acceptance: no order details before verification; no claimed ticket unless
-  the tool reports `created=True`.
+- Apply the fixed reference date and business-day rules.
+- Guard tool use so the order ID is caller-provided, verification proof was
+  stated by the caller, one retry is allowed, and proof is redacted from ticket
+  summaries.
+- Acceptance: no order details before successful verification; no claimed
+  ticket unless the tool reports `created=True`.
+- Status: complete; CSV, date, and tool-boundary modules are in `src/zentromart/`.
 
-## Part 4 — Text baseline and evaluation
+## Part 4 — NVIDIA LLM agent and evaluation
 
-- Implement the prompt-only baseline and the RAG agent as separate stages.
+- Implement the prompt-only baseline and the RAG agent as separate stages,
+  using an NVIDIA Build model selected with the user.
+- Add multi-turn context, clarifying questions, refusals, and guarded function
+  calls.
 - Evaluate all practice questions and conversations, including ASR-like text,
   expected decisions, tool calls, and evidence IDs.
 - Report the Step 1 vs. Step 2 comparison and known failures.
-- NVIDIA model choice is intentionally deferred until the available Build
-  models and access are confirmed.
+- Status: awaiting NVIDIA model choice and local API key.
 
 ## Part 5 — Gnani voice and reproducible submission
 

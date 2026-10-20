@@ -10,7 +10,8 @@ The build is being delivered in parts. See [PLAN.md](PLAN.md) for the stages
 and their acceptance criteria. The dataset was validated locally, but the ZIP
 and extracted dataset are deliberately excluded from Git as required by the
 capstone submission brief. Section-aware KB parsing and BM25 retrieval live in
-`src/zentromart/knowledge.py`; the implementation is dependency-free so far.
+`src/zentromart/knowledge.py`. CSV loading, date rules, and guarded access to
+the supplied mock tools live alongside it under `src/zentromart/`.
 
 ## Dataset setup
 
