@@ -57,6 +57,8 @@ before work continues to the next part.
 - Report the Step 1 vs. Step 2 comparison and known failures.
 - Running the paid/credited model evaluation waits until the model and available
   credit budget are clear.
+- Status: harness implemented in `src/zentromart/evaluation.py`; model runs are
+  pending the user's NVIDIA model and credit clarification.
 
 ## Part 6 — Gnani voice and reproducible submission
 

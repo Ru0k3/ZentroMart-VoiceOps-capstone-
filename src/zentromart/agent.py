@@ -16,6 +16,10 @@ from .tools import ConversationToolGuard
 
 AgentMode = Literal["baseline", "rag", "conversation"]
 _SOURCE_TAG = re.compile(r"\s*\[SOURCES:\s*(.*?)\]\s*$", re.IGNORECASE | re.DOTALL)
+_DECISION_TAG = re.compile(
+    r"\s*\[DECISION:\s*(answer|clarify|escalate|refuse)\s*\]\s*$",
+    re.IGNORECASE,
+)
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -73,6 +77,7 @@ class AgentSession:
 class AgentTurn:
     answer: str
     mode: AgentMode
+    decision: str | None
     retrieved_evidence: list[dict[str, str]]
     cited_evidence_ids: list[str]
     tool_calls: list[dict[str, Any]]
@@ -174,7 +179,7 @@ class ZentroMartAgent:
 
         if not answer:
             answer = "I'm sorry, I couldn't prepare a reliable answer just now."
-        answer, cited_evidence_ids = self._extract_sources(answer, results)
+        answer, cited_evidence_ids, decision = self._extract_markers(answer, results)
         if session.tool_guard is not None:
             answer = session.tool_guard.redact(answer)
         if not session.ticket_created and re.search(
@@ -206,6 +211,7 @@ class ZentroMartAgent:
         return AgentTurn(
             answer=answer,
             mode=self.mode,
+            decision=decision,
             retrieved_evidence=[result.chunk.evidence() for result in results],
             cited_evidence_ids=cited_evidence_ids,
             tool_calls=tool_events,
@@ -244,18 +250,24 @@ class ZentroMartAgent:
         return " ".join([*recent_user_context, message])
 
     @staticmethod
-    def _extract_sources(
+    def _extract_markers(
         answer: str,
         results: list[SearchResult],
-    ) -> tuple[str, list[str]]:
-        match = _SOURCE_TAG.search(answer)
-        if not match:
-            return answer.strip(), []
-        answer = answer[:match.start()].strip()
+    ) -> tuple[str, list[str], str | None]:
+        decision_match = _DECISION_TAG.search(answer)
+        decision = decision_match.group(1).casefold() if decision_match else None
+        if decision_match:
+            answer = answer[:decision_match.start()] + answer[decision_match.end():]
+
+        source_match = _SOURCE_TAG.search(answer)
+        if not source_match:
+            return answer.strip(), [], decision
+        source_text = source_match.group(1)
+        answer = answer[:source_match.start()] + answer[source_match.end():]
         allowed = {result.chunk.section_id for result in results}
-        raw_ids = [value.strip() for value in match.group(1).split(",")]
+        raw_ids = [value.strip() for value in source_text.split(",")]
         cited = [section_id for section_id in raw_ids if section_id in allowed]
-        return answer, cited
+        return answer.strip(), cited, decision
 
     @staticmethod
     def _sanitize_tool_calls(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:

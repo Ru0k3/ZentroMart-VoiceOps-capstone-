@@ -53,3 +53,19 @@ The final repository will include installation instructions, `.env.example`,
 and one command that processes a folder of audio and saves text, speech, and
 retrieved evidence. Deliverables also include a report of at most four pages,
 sample outputs, and an individual demo of at most two minutes.
+
+## Practice evaluation
+
+Run a small RAG sample after configuring the NVIDIA Build key and model:
+
+```bash
+PYTHONPATH=src python -m zentromart.evaluation --mode rag --limit 1
+```
+
+The evaluator reports decisions, literal required/forbidden phrase checks,
+evidence coverage, tool-call expectations, and token usage. Fact matching is
+an approximate phrase check; review multilingual and paraphrased cases by hand.
+The JSONL output is written under the ignored `outputs/` directory and omits
+customer messages and verification values. Use `--mode all --all-cases` to run
+the complete baseline, RAG, and multi-turn practice suites; this can make many
+NVIDIA requests and consume credits.
