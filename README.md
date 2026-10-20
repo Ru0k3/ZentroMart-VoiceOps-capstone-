@@ -11,7 +11,9 @@ and their acceptance criteria. The dataset was validated locally, but the ZIP
 and extracted dataset are deliberately excluded from Git as required by the
 capstone submission brief. Section-aware KB parsing and BM25 retrieval live in
 `src/zentromart/knowledge.py`. CSV loading, date rules, and guarded access to
-the supplied mock tools live alongside it under `src/zentromart/`.
+the supplied mock tools, staged agent modes, and NVIDIA Build client live
+alongside it under `src/zentromart/`. Model requests are not sent until an
+NVIDIA model and local credentials are configured.
 
 ## Dataset setup
 

@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass
 from math import log
 from pathlib import Path
 import re
-from typing import Iterable
+from typing import Iterable, Mapping
 
 
 _FRONTMATTER = re.compile(r"\A---\s*\n(.*?)\n---\s*(?:\n|\Z)", re.DOTALL)
@@ -25,6 +25,7 @@ _TOKEN = re.compile(r"[^\W_]+|₹", re.UNICODE)
 _SOURCE_PRIORITY = {
     "policy": 5,
     "agent_guide": 4,
+    "product": 3,
     "meta": 3,
     "help": 2,
     "faq": 1,
@@ -137,6 +138,35 @@ def load_knowledge_base(kb_root: Path) -> list[KnowledgeChunk]:
     chunks: list[KnowledgeChunk] = []
     for path in files:
         chunks.extend(parse_document(path, kb_root))
+    return chunks
+
+
+def product_catalog_chunks(
+    products: Iterable[Mapping[str, str]],
+) -> list[KnowledgeChunk]:
+    """Represent product facts as evidence with the evaluator's catalog IDs."""
+    chunks: list[KnowledgeChunk] = []
+    for product in products:
+        sku = product.get("sku", "").strip()
+        if not sku:
+            continue
+        fields = [
+            f"{key}: {value}" for key, value in product.items()
+            if value not in (None, "")
+        ]
+        chunks.append(KnowledgeChunk(
+            section_id=f"products.csv:{sku}",
+            section_title=product.get("title", sku),
+            content="\n".join(fields),
+            doc_id="PRODUCT-CATALOG",
+            doc_title="ZentroMart product catalog",
+            doc_type="product",
+            status="current",
+            effective_from="",
+            version="dataset snapshot",
+            language="en",
+            source_path="data/products.csv",
+        ))
     return chunks
 
 

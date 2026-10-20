@@ -48,8 +48,18 @@ class ConversationToolGuard:
 
     def record_caller_message(self, caller_message: str) -> None:
         """Record order IDs mentioned by the caller before handling tool calls."""
-        for match in _ORDER_ID_PATTERN.finditer(caller_message):
-            self._seen_order_ids.add(_ASCII_DIGITS.sub("", match.group(0)))
+        self._seen_order_ids.update(self.order_ids_mentioned(caller_message))
+
+    @staticmethod
+    def order_ids_mentioned(caller_message: str) -> set[str]:
+        return {
+            _ASCII_DIGITS.sub("", match.group(0))
+            for match in _ORDER_ID_PATTERN.finditer(caller_message)
+        }
+
+    @property
+    def unverified_order_ids(self) -> set[str]:
+        return self._seen_order_ids - self._verified.keys()
 
     def lookup_order(
         self,
@@ -89,7 +99,12 @@ class ConversationToolGuard:
         self._proof_values.add(proof)
         result = self._tools.lookup_order(order_key, verification_value=proof)
         if result.get("verified"):
-            self._verified[order_key] = result.copy()
+            safe_result = result.copy()
+            # The delivery pincode was used as authentication; it is not useful
+            # to the response generator and must not be repeated back.
+            safe_result.pop("delivery_pincode", None)
+            self._verified[order_key] = safe_result.copy()
+            return safe_result
         else:
             self._attempts[order_key] = attempts + 1
         return result
@@ -108,6 +123,16 @@ class ConversationToolGuard:
             )
         safe_arguments["summary"] = summary
         return self._tools.create_ticket(**safe_arguments)
+
+    def redact(self, text: str) -> str:
+        """Remove verification values from assistant text and stored history."""
+        for proof in self._proof_values:
+            text = re.sub(
+                rf"(?<!\d){re.escape(proof)}(?!\d)",
+                "[verification redacted]",
+                text,
+            )
+        return text
 
     def has_verified(self, order_id: str) -> bool:
         order_key = _ASCII_DIGITS.sub("", str(order_id))

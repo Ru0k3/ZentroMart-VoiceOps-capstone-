@@ -37,18 +37,28 @@ before work continues to the next part.
   ticket unless the tool reports `created=True`.
 - Status: complete; CSV, date, and tool-boundary modules are in `src/zentromart/`.
 
-## Part 4 — NVIDIA LLM agent and evaluation
+## Part 4 — NVIDIA LLM agent
 
 - Implement the prompt-only baseline and the RAG agent as separate stages,
   using an NVIDIA Build model selected with the user.
 - Add multi-turn context, clarifying questions, refusals, and guarded function
   calls.
+- Keep model, API base, and key configurable; record token usage and avoid
+  hidden retries.
+- Acceptance: baseline, RAG, and conversation modes share one client; tool
+  calls are bounded and verification values are not retained in session text.
+- Status: code complete; NVIDIA API calls wait for model, key, and the credit
+  budget clarification.
+
+## Part 5 — Evaluation
+
 - Evaluate all practice questions and conversations, including ASR-like text,
   expected decisions, tool calls, and evidence IDs.
 - Report the Step 1 vs. Step 2 comparison and known failures.
-- Status: awaiting NVIDIA model choice and local API key.
+- Running the paid/credited model evaluation waits until the model and available
+  credit budget are clear.
 
-## Part 5 — Gnani voice and reproducible submission
+## Part 6 — Gnani voice and reproducible submission
 
 - Add Gnani-only STT and TTS after an API key is available; do not add a
   different speech provider.
