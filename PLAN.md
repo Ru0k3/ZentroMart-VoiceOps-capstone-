@@ -70,6 +70,10 @@ before work continues to the next part.
   sample outputs, and an individual two-minute demo plan/video.
 - Acceptance: no keys, dataset copy, virtual environment, or real customer data
   in the submission.
+- Status: Gnani REST STT/TTS batch pipeline, install metadata, command-line
+  entry point, report draft, demo outline, and sample-output instructions are
+  implemented. Live audio/model validation and actual sample outputs await
+  the scheduled test; credentials remain local.
 
 ## Dataset rules carried into implementation
 

@@ -28,12 +28,21 @@ Use 20 October 2026 as its reference date; business-day counts run Monday
 through Saturday except listed holidays, while return windows use calendar
 days.
 
-## Secrets and providers
+## Install and configure
 
-Copy `.env.example` to `.env` for local development and keep the latter out of
-Git. The NVIDIA Build model will be selected during implementation. Gnani STT
-and TTS credentials are only needed for the final voice stage. Never put API
-keys in source code, commits, reports, or chat.
+Install Python dependencies and the project, then copy `.env.example` to `.env`:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install -e .
+cp .env.example .env
+```
+
+Set `NVIDIA_API_KEY`, `NVIDIA_MODEL`, and `GNANI_API_KEY` in `.env`. Keep that
+file local; it is ignored by Git. Never put API keys in source code, commits,
+reports, or chat. The same Gnani key is used for both STT and TTS.
 
 ## Capstone requirements
 
@@ -53,6 +62,24 @@ The final repository will include installation instructions, `.env.example`,
 and one command that processes a folder of audio and saves text, speech, and
 retrieved evidence. Deliverables also include a report of at most four pages,
 sample outputs, and an individual demo of at most two minutes.
+
+## Voice batch command
+
+Place the builder's own test recordings in a folder. Supported input formats
+are WAV, MP3, FLAC, OGG, and M4A; each clip must be at most 60 seconds. Run:
+
+```bash
+zentromart-voice ./my_audio --output ./outputs/voice_batch --mode conversation --language en-IN --tts-language en-IN --voice Kaveri
+```
+
+The command writes one subfolder per input clip with `reply.txt`, `reply.wav`,
+and `evidence.json` containing retrieved chunks, cited IDs, decision, safe tool
+events, and token use. It does not write the recognized customer transcript.
+The default output directory is ignored by Git. Each file starts a fresh
+conversation; use one customer utterance per file. Add `--session-scope folder`
+when the ordered files are follow-up turns from one caller. Keep separate
+callers in separate runs. `--mode` also accepts `baseline` and `rag`. Gnani is
+the only speech provider.
 
 ## Practice evaluation
 
