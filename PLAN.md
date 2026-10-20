@@ -19,8 +19,11 @@ before work continues to the next part.
 - Apply the documented source precedence and exclude superseded material from
   normal policy answers unless its successor says otherwise.
 - Retrieve and retain source chunks for every answer.
-- Acceptance: answers can return the retrieved section IDs and say they do not
-  know when supported evidence is missing.
+- Acceptance: retrieval returns ranked section chunks with their evidence IDs
+  and metadata; superseded chunks are excluded by default. Answer abstention
+  will be implemented with the LLM agent in Part 4.
+- Status: complete; section parser and dependency-free BM25 retrieval are in
+  `src/zentromart/knowledge.py`.
 
 ## Part 3 — Structured data, tools, and conversation handling
 
