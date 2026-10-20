@@ -1,0 +1,21 @@
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+
+# Capstone data is synthetic but must not be bundled in the submission.
+Capstone_Project_Dataset_FTTT_2026.zip
+Capstone_Project_Dataset_FTTT_2026/
+
+# Generated agent state and local run artifacts.
+tools/tickets_created.csv
+vector_store/
+outputs/
