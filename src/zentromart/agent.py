@@ -83,7 +83,6 @@ class AgentSession:
 
     tool_guard: ConversationToolGuard | None = None
     messages: list[dict[str, str]] = field(default_factory=list)
-    ticket_created: bool = False
 
 
 @dataclass(frozen=True)
@@ -146,6 +145,7 @@ class ZentroMartAgent:
         tool_events: list[dict[str, Any]] = []
         answer = ""
         lookup_failed = False
+        ticket_created_this_turn = False
 
         for round_index in range(self.max_tool_rounds + 1):
             completion = self.client.complete(
@@ -191,7 +191,7 @@ class ZentroMartAgent:
                     if event.get("name") == "lookup_order" and not event.get("verified"):
                         lookup_failed = True
                     if event.get("name") == "create_ticket" and event.get("created"):
-                        session.ticket_created = True
+                        ticket_created_this_turn = True
                 request_messages.append({
                     "role": "tool",
                     "tool_call_id": call.get("id", ""),
@@ -214,7 +214,7 @@ class ZentroMartAgent:
             decision = "clarify"
         if session.tool_guard is not None:
             answer = session.tool_guard.redact(answer)
-        if not session.ticket_created and self._claims_handover(answer):
+        if not ticket_created_this_turn and self._claims_handover(answer):
             answer = (
                 "I wasn't able to complete the handover yet, so I can't say a "
                 "ticket was created. Please try again or contact a human support colleague."
@@ -506,11 +506,6 @@ class ZentroMartAgent:
                 }
                 return result, event
             if name == "create_ticket":
-                if session.ticket_created:
-                    return (
-                        {"created": False, "error": "A handover ticket already exists for this session."},
-                        {"name": name, "created": False, "duplicate_blocked": True},
-                    )
                 result = session.tool_guard.create_ticket(**arguments)
                 return result, {
                     "name": name,

@@ -47,20 +47,20 @@ before work continues to the next part.
   hidden retries.
 - Acceptance: baseline, RAG, and conversation modes share one client; tool
   calls are bounded and verification values are not retained in session text.
-- Status: baseline, RAG, and conversation agent implementations are present.
-  The recorded full run used `nvidia/nemotron-3.5-lightning-30b-a3b`. A later
-  provider-backed conversation rerun hit HTTP 429. The post-run tool safety
-  changes still need a full provider-backed rerun.
+- Status: baseline, RAG, and conversation implementations are present. The
+  conversation loop permits one support action and one final response per turn;
+  failed verification blocks order-specific replies. The selected model is
+  `nvidia/nemotron-3.5-lightning-30b-a3b`. Explicit opt-in 429 retries are
+  available for long evaluations; retries remain off by default.
 
 ## Part 5 — Evaluation
 
 - Evaluate all practice questions and conversations, including ASR-like text,
   expected decisions, tool calls, and evidence IDs.
 - Report the Step 1 vs. Step 2 comparison and known failures.
-- Status: full baseline, RAG, and conversation result files exist under local
-  `outputs/final-evaluation/`. Their scores and limitations are in
-  `REPORT.md`. The full conversation scores predate the later tool-safety
-  changes; rerun the affected suite when NVIDIA Build's rate limit clears.
+- Status: all 52 baseline questions, 52 RAG questions, and 96 conversation
+  turns have completed. Full scores and known limits, including low citation
+  recall and NVIDIA rate limiting, are recorded in `REPORT.md`.
 
 ## Part 6 — Gnani voice and reproducible submission
 
@@ -72,11 +72,9 @@ before work continues to the next part.
   sample outputs, and an individual two-minute demo plan/video.
 - Acceptance: no keys, dataset copy, virtual environment, or real customer data
   in the submission.
-- Status: Gnani STT/TTS batch flow and one end-to-end voice run completed.
-  That run lacked the relevant warranty citation and predates the latest
-  retrieval fix. The report and timed demo instructions now disclose this.
-  A grounded rerun and final video are still required; credentials remain
-  local.
+- Status: the own-voice Hindi STT→RAG→TTS flow completed with citations
+  `WAR-2` and `products.csv:ELE-0012`; a 119-second demo video and sanitized
+  voice/RAG sample outputs are included. Credentials remain local.
 
 ## Dataset rules carried into implementation
 

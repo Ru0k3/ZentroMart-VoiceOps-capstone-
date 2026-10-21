@@ -14,8 +14,9 @@ KB parsing and BM25 retrieval live in
 the supplied mock tools, staged agent modes, and NVIDIA Build client live
 alongside it under `src/zentromart/`. The full practice suites and one
 end-to-end voice run have been exercised; see [REPORT.md](REPORT.md) for scores
-and known gaps. Conversation safety changes and a Hindi retrieval fix were
-made after those runs and still need provider-backed reruns.
+and known gaps. The final full baseline, RAG, and conversation practice suites
+include those conversation safety changes and the Hindi retrieval fix; the
+conversation suite had low strict and citation scores, documented in the report.
 
 ## Dataset setup
 
@@ -62,7 +63,7 @@ reports, or chat. The same Gnani key is used for both STT and TTS.
 
 The repository includes installation instructions, `.env.example`,
 and one command that processes a folder of audio and saves text, speech, and
-retrieved evidence. Deliverables also include a report of at most four pages,
+retrieved evidence. Deliverables also include a report PDF of at most four pages,
 sample outputs, and the [119-second individual demo](demo.mp4). See
 [DEMO_PLAN.md](DEMO_PLAN.md) for its timings and replay instructions.
 
@@ -98,4 +99,7 @@ an approximate phrase check; review multilingual and paraphrased cases by hand.
 The JSONL output is written under the ignored `outputs/` directory and omits
 customer messages and verification values. Use `--mode all --all-cases` to run
 the complete baseline, RAG, and multi-turn practice suites; this can make many
-NVIDIA requests and consume credits.
+NVIDIA requests and consume credits. NVIDIA 429 retries are off by default. To
+explicitly wait 60 seconds and retry up to eight times per throttled request,
+add `--retry-rate-limits 8`; each wait is printed to stderr. Checkpointed JSONL
+keeps completed cases if a run still stops.

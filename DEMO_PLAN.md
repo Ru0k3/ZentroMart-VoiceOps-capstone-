@@ -3,8 +3,8 @@
 `demo.mp4` is a 119.35-second demonstration using the builder's own Hindi
 recording, the verified Gnani TTS reply, retrieved source IDs, a warranty
 follow-up evidence check, and an actual unsupported practice case. It uses only
-the supplied synthetic dataset. The private input recording and recognized
-transcript are not included in the repository.
+the supplied synthetic dataset. The standalone input audio and recognized
+transcript are not checked in; the video embeds the builder's own-voice segment.
 
 ## Video timing
 

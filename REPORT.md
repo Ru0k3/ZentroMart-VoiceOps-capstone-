@@ -33,23 +33,28 @@ signals rather than semantic quality scores.
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Prompt-only baseline | 52 | 2 (3.8%) | 31/52 | 10/52 | 52/52 | 0/90 |
 | RAG | 52 | 8 (15.4%) | 39/52 | 26/52 | 52/52 | 30/90 (33.3%) |
-| Conversations | 96 | 2 (2.1%) | 51/96 | 68/96 | 96/96 | 4/112 (3.6%) |
+| Conversations | 96 | 2 (2.1%) | 54/96 | 72/96 | 96/96 | 2/112 (1.8%) |
 
 RAG improved required-fact matches from 10 to 26 and matched 30 gold evidence
 IDs where baseline matched none. The full conversation run passed 83/96
-expected tool-action checks. Its traces showed parallel action proposals and
-duplicate ticket attempts, so the agent now executes at most one support action
-per customer turn, blocks a second ticket in the same session, and replaces an
-order-specific answer with a verification request after a failed lookup. A
+expected tool-action checks. Its traces showed parallel action proposals, so
+the agent now executes at most one support action per customer turn and replaces
+an order-specific answer with a verification request after a failed lookup. A
 scripted local check confirmed those safeguards. Decision tags and source tags
 are also recovered when omitted: decisions use a conservative text rule, and
 citations require substantial overlap with retrieved passage content.
 
-The full conversation figures include the safety, decision, and citation
-changes. A final RAG refresh using the warranty-intent boost and stricter
-no-invented-navigation prompt completed all 52 cases in rate-limited batches.
-The conversation figures still need a final rerun against that retrieval/prompt
-revision. Treat the low strict and evidence scores as material limitations.
+The final conversation run used the updated retrieval and prompt code and
+completed all 96 turns, with explicit waits after NVIDIA HTTP 429 responses.
+Its strict score was 2/96; evidence matching was 2/112 (1.8%). These low scores
+are material limitations: grounded voice success on one targeted warranty case
+does not imply reliable citation coverage across the full practice suite.
+The main failure is evidence coverage in conversation mode. I would next test
+retrieval depth and prompt behavior separately, then make citation selection
+more reliable from the passages actually supplied to the model and rerun all
+conversation cases. The low strict-pass counts also need case-by-case review;
+the current literal phrase checks can miss correct paraphrases, but that does
+not explain away the evidence-recall result.
 
 **Targeted retrieval regression (PQ0002):** The practice ASR wording
 “ele-zero zero one to” previously mapped poorly and unrelated product rows

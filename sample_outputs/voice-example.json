@@ -27,5 +27,5 @@
     "tts_model": "timbre-v2.5",
     "voice": "Kaveri"
   },
-  "note": "Actual voice run. The private input recording and recognized transcript are not included."
+  "note": "Actual voice run. This JSON omits standalone audio and transcript; demo.mp4 embeds the builder's own-voice segment."
 }
