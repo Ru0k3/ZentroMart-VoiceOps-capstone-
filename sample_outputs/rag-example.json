@@ -1,0 +1,27 @@
+{
+  "mode": "rag",
+  "practice_case": "PQ0006",
+  "answer": "Hello! I'm ZentroMart's AI assistant. As a ZentroMart Plus member, you will not be charged the reverse pickup fee of ₹49 for returning shoes you don't like. The fee is waived for all returns by Plus members, regardless of the reason.",
+  "decision": "answer",
+  "cited_evidence_ids": [
+    "RET-6",
+    "PLS-2"
+  ],
+  "evidence": [
+    {
+      "section_id": "RET-6",
+      "title": "Reverse pickup and fees",
+      "excerpt": "A reverse pickup fee of ₹49 applies to change-of-mind returns of clothing, footwear and bags. The fee is waived for ZentroMart Plus members and for any item returned because it was damaged, defective or wrong."
+    },
+    {
+      "section_id": "PLS-2",
+      "title": "Benefits",
+      "excerpt": "No reverse pickup fee on any return. ZentroMart Plus does not change return windows, return eligibility or refund timelines after initiation."
+    }
+  ],
+  "evaluation": {
+    "strict_pass": true,
+    "gold_evidence_recall": 1.0
+  },
+  "note": "Actual full-suite RAG result. It illustrates evidence-backed output; it does not represent overall model performance."
+}

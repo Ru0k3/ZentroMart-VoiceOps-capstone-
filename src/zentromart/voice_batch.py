@@ -23,6 +23,65 @@ def prepare_for_speech(text: str) -> str:
     return re.sub(r"(?<!\d)(\d{4})(\d{4})(?!\d)", r"\1 \2", text)
 
 
+def normalize_wav_header(audio_bytes: bytes) -> bytes:
+    """Repair unknown-length RIFF sizes some TTS streams leave as 0xFFFFFFFF."""
+    if len(audio_bytes) < 12 or audio_bytes[:4] != b"RIFF" or audio_bytes[8:12] != b"WAVE":
+        raise ValueError("Gnani TTS returned data without a RIFF/WAVE header")
+    if len(audio_bytes) - 8 >= 0xFFFFFFFF:
+        raise ValueError("Gnani TTS WAV is too large for a standard RIFF container")
+
+    repaired = bytearray(audio_bytes)
+    repaired[4:8] = (len(repaired) - 8).to_bytes(4, "little")
+    offset = 12
+    found_data = False
+    while offset + 8 <= len(repaired):
+        chunk_id = repaired[offset:offset + 4]
+        chunk_size = int.from_bytes(repaired[offset + 4:offset + 8], "little")
+        content_start = offset + 8
+        if chunk_size == 0xFFFFFFFF:
+            if chunk_id != b"data":
+                raise ValueError("Gnani TTS WAV has an unknown non-audio chunk size")
+            chunk_size = len(repaired) - content_start
+            repaired[offset + 4:offset + 8] = chunk_size.to_bytes(4, "little")
+        if content_start + chunk_size > len(repaired):
+            raise ValueError("Gnani TTS WAV contains a truncated chunk")
+        if chunk_id == b"data":
+            found_data = True
+        offset = content_start + chunk_size + (chunk_size % 2)
+
+    if not found_data:
+        raise ValueError("Gnani TTS WAV does not contain an audio data chunk")
+    return bytes(repaired)
+
+
+def transcribe_audio(stt: Any, source: Path, language: str) -> dict[str, Any]:
+    """Use Gnani batch STT when REST rejects a clip over its duration limit."""
+    try:
+        return stt.transcribe(str(source), language_code=language)
+    except Exception as error:
+        try:
+            from gnani.stt import APIError, GnaniSTTBatchClient
+        except ImportError:
+            raise error
+        if not isinstance(error, APIError) or error.status_code != 400:
+            raise
+        try:
+            response = json.loads(error.body)
+            detail = response.get("error", {})
+            error_type = detail.get("type") if isinstance(detail, dict) else None
+        except (TypeError, ValueError):
+            error_type = None
+        if error_type != "MAX_AUDIO_DURATION_EXCEEDED":
+            raise
+
+        result = GnaniSTTBatchClient().transcribe(
+            [str(source)], language_code=language, progress=False
+        )
+        if len(result) != 1 or not result[0].ok:
+            raise RuntimeError("Gnani batch STT could not transcribe the input audio")
+        return {"transcript": result[0].text}
+
+
 def find_audio_files(folder: Path) -> list[Path]:
     if not folder.is_dir():
         raise NotADirectoryError(f"Audio input folder does not exist: {folder}")
@@ -69,7 +128,7 @@ def process_audio_file(
     target = _relative_target(source, input_root, output_root)
     target.mkdir(parents=True, exist_ok=True)
 
-    transcription = stt.transcribe(str(source), language_code=language)
+    transcription = transcribe_audio(stt, source, language)
     transcript = str(transcription.get("transcript", "")).strip()
     if transcript:
         turn = agent.respond(transcript, session)
@@ -86,6 +145,7 @@ def process_audio_file(
         language=tts_language,
         speed=tts_speed,
     )
+    audio_bytes = normalize_wav_header(audio_bytes)
     (target / "reply.txt").write_text(speech_text + "\n", encoding="utf-8")
     (target / "reply.wav").write_bytes(audio_bytes)
 

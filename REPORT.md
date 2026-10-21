@@ -1,53 +1,85 @@
-# ZentroMart VoiceOps — capstone report draft
+# ZentroMart VoiceOps — practice report
 
-**Author:** Individual project  
-**Repository:** https://github.com/Ru0k3/ZentroMart-VoiceOps-capstone-  
-**Dataset date:** 20 October 2026
+**Author:** Individual project
 
-## What I built
+**Repository:** https://github.com/Ru0k3/ZentroMart-VoiceOps-capstone-
 
-The project follows the four capstone stages. Step 1 is a prompt-only baseline.
-Step 2 retrieves section-aware passages from the supplied knowledge base and
-product catalog. Step 3 adds multi-turn context and identity-gated order and
-ticket tools. Step 4 sends audio through Gnani Prisma STT, the same support
-agent, then Gnani Timbre TTS. NVIDIA Build is the configurable LLM provider.
+**Dataset reference date:** 20 October 2026
 
-The retrieval layer preserves section IDs and policy metadata, ranks evidence
-with BM25, and excludes superseded material by default. CSV values remain
-strings. Order details require the supplied verification tool, and a handover
-is reported only after the ticket tool confirms creation.
+**LLM used for the recorded full evaluation:** `nvidia/nemotron-3.5-lightning-30b-a3b`
 
-## Evaluation
+## System
 
-Run the supplied practice questions in both baseline and RAG modes, then run
-the multi-turn conversations. The harness records expected decisions, literal
-required and forbidden phrase checks, cited evidence, tool-call expectations,
-and model token counts. Phrase matching is approximate; multilingual cases
-and paraphrases require human review.
+The implementation follows the four capstone stages: a prompt-only baseline,
+section-aware RAG over the supplied knowledge base and product catalog,
+multi-turn order and ticket tools, and Gnani Prisma STT → the support agent →
+Gnani Timbre TTS. Retrieval uses BM25, retains section IDs and policy metadata,
+and excludes superseded policies by default. CSV identifiers stay strings.
+Order details are gated by the dataset verification tool; ticket success is
+reported only after the tool confirms creation. Voice outputs save the reply,
+WAV audio, retrieved evidence, and citations, but do not save the recognized
+customer transcript.
 
-| Practice suite | Cases | Decision pass | Evidence recall | Strict pass |
-| --- | ---: | ---: | ---: | ---: |
-| Prompt-only baseline | Pending run | Pending | n/a | Pending |
-| RAG | Pending run | Pending | Pending | Pending |
-| Multi-turn conversations | Pending run | Pending | Pending | Pending |
+## Full practice evaluation
 
-**What failed and what I would improve:** Complete this section after reviewing
-the actual run output. Do not enter scores until the harness has run with the
-selected NVIDIA model and available credit budget.
+The full saved run contains 52 baseline questions, 52 RAG questions, and 96
+conversation turns. The model was `nvidia/nemotron-3.5-lightning-30b-a3b`.
+Strict pass requires the expected decision, required and forbidden phrase
+checks, expected tool actions, and all gold evidence IDs where applicable.
+Phrase matching is literal after normalization, so these are practice-set
+signals rather than semantic quality scores.
 
-## Voice and reproducibility
+| Stage | Cases | Strict pass | Decision pass | Required facts pass | Forbidden facts pass | Gold evidence matched |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Prompt-only baseline | 52 | 2 (3.8%) | 31/52 | 10/52 | 52/52 | 0/90 |
+| RAG | 52 | 8 (15.4%) | 39/52 | 26/52 | 52/52 | 30/90 (33.3%) |
+| Conversations | 96 | 2 (2.1%) | 51/96 | 68/96 | 96/96 | 4/112 (3.6%) |
 
-The batch command accepts WAV, MP3, FLAC, OGG, and M4A clips up to 60 seconds.
-For each clip it saves the spoken reply text, Gnani-generated WAV, and retrieved
-evidence metadata. It does not persist recognized customer transcripts. Only
-Gnani is used for speech recognition and synthesis.
+RAG improved required-fact matches from 10 to 26 and matched 30 gold evidence
+IDs where baseline matched none. The full conversation run passed 83/96
+expected tool-action checks. Its traces showed parallel action proposals and
+duplicate ticket attempts, so the agent now executes at most one support action
+per customer turn, blocks a second ticket in the same session, and replaces an
+order-specific answer with a verification request after a failed lookup. A
+scripted local check confirmed those safeguards. Decision tags and source tags
+are also recovered when omitted: decisions use a conservative text rule, and
+citations require substantial overlap with retrieved passage content.
 
-Install with `pip install -r requirements.txt` and `pip install -e .`; configure
-keys in a local `.env` copied from `.env.example`. The dataset and generated
-outputs are excluded from the repository.
+The full conversation figures include the safety, decision, and citation
+changes. A final RAG refresh using the warranty-intent boost and stricter
+no-invented-navigation prompt completed all 52 cases in rate-limited batches.
+The conversation figures still need a final rerun against that retrieval/prompt
+revision. Treat the low strict and evidence scores as material limitations.
 
-## Limitations and next steps
+**Targeted retrieval regression (PQ0002):** The practice ASR wording
+“ele-zero zero one to” previously mapped poorly and unrelated product rows
+crowded the relevant evidence out. Retrieval now normalizes spoken SKU digits,
+boosts exact SKU and section-title matches, and excludes other product rows
+when the query names an exact SKU. The targeted RAG case then retrieved both
+`products.csv:ELE-0012` and `WAR-2` and matched its required facts. This does
+not offset the full-set RAG score above. The result identifies a retrieval
+robustness gap; it does not establish the dataset authors' intent.
 
-Complete this section after the live run: record model/version, voice choice,
-observed errors, the Step 1 vs. Step 2 comparison, and any changes made after
-the test. Keep the final exported PDF within four pages.
+## Voice run and limits
+
+Gnani Timbre v2.5 with the Kaveri voice generated a valid 8.16-second WAV in a
+TTS smoke run. A 62.55-second own-voice recording was converted to a 59.59-second,
+16 kHz mono WAV; Gnani REST rejected it above its 30-second limit, so the runner
+falls back to Gnani batch STT for that specific error. STT, RAG, and TTS then
+completed once and produced a 28.96-second WAV.
+
+The initial voice answer retrieved no `WAR-2` and had no citation. After the
+Hindi/Hinglish retrieval changes and warranty-intent boost, a later own-voice
+run retrieved `WAR-2` plus `products.csv:ELE-0012`, answered with the 12-month
+Assured warranty and My Orders claim path, and generated a 25.76-second mono
+48 kHz WAV. The citations are in the saved evidence metadata and are not read
+aloud. This verifies one relevant voice case; it does not establish broad
+multilingual accuracy. Only the builder's own voice and the supplied synthetic
+dataset were used.
+
+## Reproduction
+
+Install dependencies with `pip install -r requirements.txt` and
+`pip install -e .`; copy `.env.example` to `.env` and supply local keys. The
+evaluation JSONL files and generated audio are local outputs and are not part
+of the repository. See `DEMO_PLAN.md` for the short demonstration sequence.

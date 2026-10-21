@@ -6,6 +6,8 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import sys
+import time
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
@@ -57,6 +59,8 @@ class NVIDIAChatClient:
         *,
         api_base: str = DEFAULT_API_BASE,
         timeout_seconds: float = 90.0,
+        rate_limit_retries: int = 0,
+        rate_limit_retry_delay: float = 60.0,
     ):
         if not api_key.strip():
             raise ValueError("NVIDIA API key is required")
@@ -66,9 +70,11 @@ class NVIDIAChatClient:
         self.model = model.strip()
         self.api_base = api_base.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.rate_limit_retries = max(0, rate_limit_retries)
+        self.rate_limit_retry_delay = max(0.0, rate_limit_retry_delay)
 
     @classmethod
-    def from_environment(cls) -> "NVIDIAChatClient":
+    def from_environment(cls, **client_options: Any) -> "NVIDIAChatClient":
         load_local_env()
         api_key = os.environ.get("NVIDIA_API_KEY", "")
         model = os.environ.get("NVIDIA_MODEL", "")
@@ -77,7 +83,7 @@ class NVIDIAChatClient:
             raise RuntimeError("Set NVIDIA_API_KEY in the local environment or .env")
         if not model:
             raise RuntimeError("Set NVIDIA_MODEL after choosing an NVIDIA Build model")
-        return cls(api_key, model, api_base=api_base)
+        return cls(api_key, model, api_base=api_base, **client_options)
 
     def complete(
         self,
@@ -97,38 +103,70 @@ class NVIDIAChatClient:
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
+        if "glm-5.3-flash" in self.model.casefold():
+            # This model defaults to max internal reasoning, which can consume
+            # the whole answer budget. NVIDIA recommends clearing thinking for
+            # chat; keep only a low reasoning budget for these support turns.
+            body["reasoning_effort"] = "low"
+            body["chat_template_kwargs"] = {"clear_thinking": True}
+        elif "nemotron-3.5-lightning-30b-a3b" in self.model.casefold():
+            # Keep the fast Lightning endpoint in chat mode without a long
+            # internal reasoning trace, which is better suited to voice turns.
+            body["chat_template_kwargs"] = {"enable_thinking": False}
 
-        request = Request(
-            urljoin(f"{self.api_base}/", "chat/completions"),
-            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            method="POST",
-        )
-        try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except HTTPError as error:
-            status = error.code
-            hint = {
-                401: "Check NVIDIA_API_KEY.",
-                402: "NVIDIA reports insufficient API credits.",
-                404: "Check NVIDIA_MODEL and model access.",
-                429: "NVIDIA rate limit reached; retry later.",
-            }.get(status, "Check model access and the request settings.")
-            raise NVIDIAAPIError(
-                f"NVIDIA Build request failed (HTTP {status}). {hint}"
-            ) from None
-        except URLError:
-            raise NVIDIAAPIError("Could not reach the NVIDIA Build API.") from None
-        except TimeoutError:
-            raise NVIDIAAPIError("NVIDIA Build request timed out.") from None
-        except json.JSONDecodeError:
-            raise NVIDIAAPIError("NVIDIA Build returned an invalid JSON response.") from None
+        payload: dict[str, Any] | None = None
+        retry_count = 0
+        completed = False
+        while not completed:
+            request = Request(
+                urljoin(f"{self.api_base}/", "chat/completions"),
+                data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                method="POST",
+            )
+            try:
+                with urlopen(request, timeout=self.timeout_seconds) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                    completed = True
+            except HTTPError as error:
+                if error.code == 429 and retry_count < self.rate_limit_retries:
+                    retry_after = error.headers.get("Retry-After")
+                    try:
+                        delay = max(0.0, float(retry_after)) if retry_after else self.rate_limit_retry_delay
+                    except ValueError:
+                        delay = self.rate_limit_retry_delay
+                    retry_count += 1
+                    print(
+                        f"NVIDIA Build returned HTTP 429; waiting {delay:g}s "
+                        f"before retry {retry_count}/{self.rate_limit_retries}.",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    time.sleep(delay)
+                    continue
+                status = error.code
+                hint = {
+                    401: "Check NVIDIA_API_KEY.",
+                    402: "NVIDIA reports insufficient API credits.",
+                    404: "Check NVIDIA_MODEL and model access.",
+                    429: "NVIDIA rate limit reached; retry later.",
+                }.get(status, "Check model access and the request settings.")
+                raise NVIDIAAPIError(
+                    f"NVIDIA Build request failed (HTTP {status}). {hint}"
+                ) from None
+            except URLError:
+                raise NVIDIAAPIError("Could not reach the NVIDIA Build API.") from None
+            except TimeoutError:
+                raise NVIDIAAPIError("NVIDIA Build request timed out.") from None
+            except json.JSONDecodeError:
+                raise NVIDIAAPIError("NVIDIA Build returned an invalid JSON response.") from None
 
+        if not isinstance(payload, dict):
+            raise NVIDIAAPIError("NVIDIA Build returned an invalid response object.")
         choices = payload.get("choices") or []
         if not choices or not isinstance(choices[0].get("message"), dict):
             raise NVIDIAAPIError("NVIDIA Build response did not contain a chat message.")

@@ -14,7 +14,7 @@ import sys
 import unicodedata
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from .agent import AgentSession, ZentroMartAgent
 from .dataset import find_dataset_root
@@ -137,34 +137,51 @@ def _case_record(
     }
 
 
-def evaluate_questions(agent: ZentroMartAgent, path: Path, limit: int | None) -> list[dict[str, Any]]:
+def evaluate_questions(
+    agent: ZentroMartAgent,
+    path: Path,
+    limit: int | None,
+    *,
+    offset: int = 0,
+    on_record: Callable[[dict[str, Any]], None] | None = None,
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     with path.open(encoding="utf-8-sig", newline="") as handle:
-        for row in csv.DictReader(handle):
-            rows.append(row)
-            if limit is not None and len(rows) >= limit:
-                break
+        rows.extend(csv.DictReader(handle))
+    rows = rows[offset:]
+    if limit is not None:
+        rows = rows[:limit]
     results: list[dict[str, Any]] = []
     for row in rows:
         prompt = row["asr_text"].strip() or row["question"].strip()
         expected = _parts(row.get("acceptable_decisions", "")) or [row.get("expected_decision", "")]
         turn = agent.respond(prompt, agent.new_session())
-        results.append(_case_record(
+        record = _case_record(
             case_id=row["id"], mode=agent.mode, turn=turn,
             expected_decisions=expected,
             must_include=row.get("must_include", ""),
             must_not_include=row.get("must_not_include", ""),
             gold_evidence=row.get("gold_evidence", ""),
-        ))
+        )
+        results.append(record)
+        if on_record:
+            on_record(record)
     return results
 
 
-def evaluate_conversations(agent: ZentroMartAgent, path: Path, limit: int | None) -> list[dict[str, Any]]:
+def evaluate_conversations(
+    agent: ZentroMartAgent,
+    path: Path,
+    limit: int | None,
+    *,
+    offset: int = 0,
+    on_record: Callable[[dict[str, Any]], None] | None = None,
+) -> list[dict[str, Any]]:
     grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
     with path.open(encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
             grouped[row["conversation_id"]].append(row)
-    selected = list(grouped.items())
+    selected = list(grouped.items())[offset:]
     if limit is not None:
         selected = selected[:limit]
     results: list[dict[str, Any]] = []
@@ -172,7 +189,7 @@ def evaluate_conversations(agent: ZentroMartAgent, path: Path, limit: int | None
         session: AgentSession = agent.new_session()
         for row in turns:
             turn = agent.respond(row["customer_message"], session)
-            results.append(_case_record(
+            record = _case_record(
                 case_id=f"{conversation_id}:turn-{row['turn']}",
                 mode=agent.mode,
                 turn=turn,
@@ -181,7 +198,10 @@ def evaluate_conversations(agent: ZentroMartAgent, path: Path, limit: int | None
                 must_not_include=row.get("must_not_include", ""),
                 gold_evidence=row.get("gold_evidence", ""),
                 expected_tools=row.get("expected_tool_calls", ""),
-            ))
+            )
+            results.append(record)
+            if on_record:
+                on_record(record)
     return results
 
 
@@ -213,10 +233,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dataset", type=Path, default=None, help="Dataset directory (defaults to ZENTROMART_DATASET_DIR or bundled local path).")
     parser.add_argument("--limit", type=int, default=1, help="Question rows and conversation groups per mode (default: 1).")
     parser.add_argument("--all-cases", action="store_true", help="Run the full practice set; may use substantial NVIDIA credits.")
+    parser.add_argument("--question-offset", type=int, default=0, help="Skip this many practice questions (for checkpointed batches).")
+    parser.add_argument("--conversation-offset", type=int, default=0, help="Skip this many conversation groups (for checkpointed batches).")
+    parser.add_argument("--retry-rate-limits", type=int, default=0, help="Explicitly retry NVIDIA HTTP 429 responses this many times; disabled by default.")
+    parser.add_argument("--rate-limit-retry-delay", type=float, default=60.0, help="Wait this many seconds when NVIDIA gives no Retry-After header (default: 60).")
     parser.add_argument("--output", type=Path, default=Path("outputs/evaluation.jsonl"))
     args = parser.parse_args(argv)
     if args.limit < 1:
         parser.error("--limit must be at least 1")
+    if args.question_offset < 0:
+        parser.error("--question-offset cannot be negative")
+    if args.conversation_offset < 0:
+        parser.error("--conversation-offset cannot be negative")
+    if args.retry_rate_limits < 0:
+        parser.error("--retry-rate-limits cannot be negative")
+    if args.rate_limit_retry_delay < 0:
+        parser.error("--rate-limit-retry-delay cannot be negative")
     limit = None if args.all_cases else args.limit
     root = find_dataset_root(args.dataset)
     questions = root / "practice" / "questions.csv"
@@ -225,27 +257,48 @@ def main(argv: list[str] | None = None) -> int:
     question_modes = sum(mode in {"baseline", "rag"} for mode in modes)
     with questions.open(encoding="utf-8-sig", newline="") as handle:
         question_count = sum(1 for _ in csv.DictReader(handle))
+    question_count = max(0, question_count - args.question_offset)
     question_count = min(question_count, limit) if limit is not None else question_count
     estimated = question_count * question_modes
-    # A conversation turn can take up to three tool rounds and one final reply.
+    # The agent permits one support action followed by one final response.
     if "conversation" in modes:
-        selected_groups = list(_read_groups(conversations).values())
+        selected_groups = list(_read_groups(conversations).values())[args.conversation_offset:]
         if limit is not None:
             selected_groups = selected_groups[:limit]
-        estimated += sum(len(group) for group in selected_groups) * 4
+        estimated += sum(len(group) for group in selected_groups) * 2
     print(f"Estimated model-call upper bound: {estimated}; full-set runs can consume credits.", file=sys.stderr)
 
     all_records: list[dict[str, Any]] = []
-    for mode in modes:
-        agent = create_agent(mode, dataset_root=root)
-        if mode == "conversation":
-            all_records.extend(evaluate_conversations(agent, conversations, limit))
-        else:
-            all_records.extend(evaluate_questions(agent, questions, limit))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", encoding="utf-8") as handle:
-        for record in all_records:
+        def checkpoint(record: dict[str, Any]) -> None:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+            handle.flush()
+
+        for mode in modes:
+            agent = create_agent(
+                mode,
+                dataset_root=root,
+                rate_limit_retries=args.retry_rate_limits,
+                rate_limit_retry_delay=args.rate_limit_retry_delay,
+            )
+            if mode == "conversation":
+                records = evaluate_conversations(
+                    agent,
+                    conversations,
+                    limit,
+                    offset=args.conversation_offset,
+                    on_record=checkpoint,
+                )
+            else:
+                records = evaluate_questions(
+                    agent,
+                    questions,
+                    limit,
+                    offset=args.question_offset,
+                    on_record=checkpoint,
+                )
+            all_records.extend(records)
     summary = summarize(all_records)
     summary["by_mode"] = {
         mode: summarize([record for record in all_records if record["mode"] == mode])

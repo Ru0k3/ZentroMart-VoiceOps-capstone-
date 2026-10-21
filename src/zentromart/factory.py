@@ -19,6 +19,8 @@ def create_agent(
     *,
     dataset_root: Path | str | None = None,
     top_k: int = 5,
+    rate_limit_retries: int = 0,
+    rate_limit_retry_delay: float = 60.0,
 ) -> ZentroMartAgent:
     """Load the local evidence and build an agent without making an API call."""
     dataset = Dataset(dataset_root)
@@ -26,7 +28,10 @@ def create_agent(
     chunks = load_knowledge_base(kb_root)
     chunks.extend(product_catalog_chunks(dataset.table("products")))
     retriever = KnowledgeRetriever(chunks)
-    client = NVIDIAChatClient.from_environment()
+    client = NVIDIAChatClient.from_environment(
+        rate_limit_retries=rate_limit_retries,
+        rate_limit_retry_delay=rate_limit_retry_delay,
+    )
     return ZentroMartAgent(
         client,
         dataset,

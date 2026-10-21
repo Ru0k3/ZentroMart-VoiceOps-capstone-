@@ -6,14 +6,16 @@ human handovers. The final stage adds Gnani speech-to-text and text-to-speech.
 
 ## Project status
 
-The build is being delivered in parts. See [PLAN.md](PLAN.md) for the stages
-and their acceptance criteria. The dataset was validated locally, but the ZIP
-and extracted dataset are deliberately excluded from Git as required by the
-capstone submission brief. Section-aware KB parsing and BM25 retrieval live in
+See [PLAN.md](PLAN.md) for the stages and their acceptance criteria. The
+dataset was validated locally, but the ZIP and extracted dataset are
+deliberately excluded from Git as required by the capstone brief. Section-aware
+KB parsing and BM25 retrieval live in
 `src/zentromart/knowledge.py`. CSV loading, date rules, and guarded access to
 the supplied mock tools, staged agent modes, and NVIDIA Build client live
-alongside it under `src/zentromart/`. Model requests are not sent until an
-NVIDIA model and local credentials are configured.
+alongside it under `src/zentromart/`. The full practice suites and one
+end-to-end voice run have been exercised; see [REPORT.md](REPORT.md) for scores
+and known gaps. Conversation safety changes and a Hindi retrieval fix were
+made after those runs and still need provider-backed reruns.
 
 ## Dataset setup
 
@@ -23,8 +25,8 @@ is `Capstone_Project_Dataset_FTTT_2026/`. Read its `README.md` and
 `DATA_DICTIONARY.md` before working with the files. Run
 `python validate_dataset.py` from that extracted directory to check the pack.
 
-The dataset is synthetic. Do not substitute real customer data or recordings.
-Use 20 October 2026 as its reference date; business-day counts run Monday
+The dataset is synthetic. Do not use real customer data or another person's
+voice recording. Use 20 October 2026 as its reference date; business-day counts run Monday
 through Saturday except listed holidays, while return windows use calendar
 days.
 
@@ -58,10 +60,11 @@ reports, or chat. The same Gnani key is used for both STT and TTS.
 
 ## Submission target
 
-The final repository will include installation instructions, `.env.example`,
+The repository includes installation instructions, `.env.example`,
 and one command that processes a folder of audio and saves text, speech, and
 retrieved evidence. Deliverables also include a report of at most four pages,
-sample outputs, and an individual demo of at most two minutes.
+sample outputs, and the [119-second individual demo](demo.mp4). See
+[DEMO_PLAN.md](DEMO_PLAN.md) for its timings and replay instructions.
 
 ## Voice batch command
 

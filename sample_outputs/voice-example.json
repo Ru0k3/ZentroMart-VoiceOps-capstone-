@@ -1,0 +1,31 @@
+{
+  "mode": "rag",
+  "input": "builder's own Hindi voice recording; audio and transcript omitted",
+  "decision": "answer",
+  "reply": "नमस्ते! मैं ZentroMart का AI असिस्टेंट हूँ। मुझे SKU ELE-0012 के बारे में पूछना है।\n\nस्रोत के अनुसार, SKU ELE-0012 (Kestrel K7 Smartphone 128 GB, Beige) assured है। इसकी ZentroMart Assured वारंटी 12 महीने की है, जो डिलीवरी की तारीख से शुरू होती है।\n\nऐप में My Orders सेक्शन खोलकर आप क्लेम शुरू कर सकते हैं। ZentroMart पिकअप और मरम्मत या प्रतिस्थापन की व्यवस्था करेगा।",
+  "cited_evidence_ids": [
+    "WAR-2",
+    "products.csv:ELE-0012"
+  ],
+  "evidence": [
+    {
+      "section_id": "WAR-2",
+      "title": "ZentroMart Assured",
+      "excerpt": "Products marked assured = true carry a 12-month ZentroMart Assured warranty from delivery. Claims are raised in the app under My Orders, and ZentroMart arranges pickup and repair or replacement."
+    },
+    {
+      "section_id": "products.csv:ELE-0012",
+      "title": "Kestrel K7 Smartphone 128 GB, Beige",
+      "excerpt": "SKU ELE-0012; assured = True; warranty_months = 12."
+    }
+  ],
+  "audio": {
+    "format": "WAV PCM",
+    "channels": 1,
+    "sample_rate_hz": 48000,
+    "duration_seconds": 25.76,
+    "tts_model": "timbre-v2.5",
+    "voice": "Kaveri"
+  },
+  "note": "Actual voice run. The private input recording and recognized transcript are not included."
+}

@@ -20,6 +20,19 @@ _DECISION_TAG = re.compile(
     r"\s*\[DECISION:\s*(answer|clarify|escalate|refuse)\s*\]\s*$",
     re.IGNORECASE,
 )
+_CITATION_STOPWORDS = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from",
+    "how", "i", "in", "is", "it", "me", "of", "on", "or", "please",
+    "so", "the", "this", "to", "was", "we", "what", "when", "where",
+    "which", "who", "with", "you", "your", "can", "could", "would",
+    "should", "do", "does", "did", "have", "has", "had", "will", "am",
+    "my", "our", "their", "them", "they", "there", "here", "order",
+    "product", "item", "customer", "policy", "help", "zentromart", "sku",
+    "है", "हैं", "हो", "का", "की", "के", "में", "से", "पर", "और",
+    "क्या", "कैसे", "कहाँ", "मुझे", "मैं", "मेरा", "मेरी", "मेरे", "यह",
+    "ये", "वह", "तो", "एक", "लिए", "कर", "करें", "रहा", "रही", "रहे",
+    "कृपया", "बताइए", "आपका", "आपकी", "हूँ", "होगा", "होगी",
+})
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -95,7 +108,7 @@ class ZentroMartAgent:
         *,
         mode: AgentMode = "conversation",
         top_k: int = 5,
-        max_tool_rounds: int = 3,
+        max_tool_rounds: int = 1,
     ):
         if mode not in {"baseline", "rag", "conversation"}:
             raise ValueError(f"Unsupported agent mode: {mode}")
@@ -132,6 +145,7 @@ class ZentroMartAgent:
         usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         tool_events: list[dict[str, Any]] = []
         answer = ""
+        lookup_failed = False
 
         for round_index in range(self.max_tool_rounds + 1):
             completion = self.client.complete(
@@ -164,11 +178,18 @@ class ZentroMartAgent:
                    if assistant_message.get("reasoning_content") else {}),
             })
             for call in calls:
-                if len(tool_events) >= 4:
-                    result = {"error": "Per-turn support action limit reached."}
+                if tool_events:
+                    result = {
+                        "error": (
+                            "Only one support action is allowed per customer turn. "
+                            "Continue with the result already returned."
+                        )
+                    }
                 else:
                     result, event = self._run_tool(call, session, message)
                     tool_events.append(event)
+                    if event.get("name") == "lookup_order" and not event.get("verified"):
+                        lookup_failed = True
                     if event.get("name") == "create_ticket" and event.get("created"):
                         session.ticket_created = True
                 request_messages.append({
@@ -180,16 +201,20 @@ class ZentroMartAgent:
         if not answer:
             answer = "I'm sorry, I couldn't prepare a reliable answer just now."
         answer, cited_evidence_ids, decision = self._extract_markers(answer, results)
+        answer = self._strip_citation_artifacts(answer, results)
+        if decision is None:
+            decision = self._infer_decision(answer)
+        if self._must_request_order_verification(message, session, lookup_failed):
+            answer = (
+                "I can't share order-specific details until the order is verified. "
+                "Please provide either the last four digits of the registered "
+                "phone number or the delivery pincode."
+            )
+            cited_evidence_ids = []
+            decision = "clarify"
         if session.tool_guard is not None:
             answer = session.tool_guard.redact(answer)
-        if not session.ticket_created and re.search(
-            r"\b(?:ticket (?:has been|was) created|"
-            r"i(?:'ve| have)? created (?:a|the) ticket|"
-            r"handover (?:has been|was) submitted|"
-            r"i(?:'ve| have)? escalated|human colleague will contact you)\b",
-            answer,
-            flags=re.IGNORECASE,
-        ):
+        if not session.ticket_created and self._claims_handover(answer):
             answer = (
                 "I wasn't able to complete the handover yet, so I can't say a "
                 "ticket was created. Please try again or contact a human support colleague."
@@ -261,13 +286,168 @@ class ZentroMartAgent:
 
         source_match = _SOURCE_TAG.search(answer)
         if not source_match:
-            return answer.strip(), [], decision
+            return (
+                answer.strip(),
+                ZentroMartAgent._overlap_citations(answer, results),
+                decision,
+            )
         source_text = source_match.group(1)
         answer = answer[:source_match.start()] + answer[source_match.end():]
         allowed = {result.chunk.section_id for result in results}
         raw_ids = [value.strip() for value in source_text.split(",")]
         cited = [section_id for section_id in raw_ids if section_id in allowed]
         return answer.strip(), cited, decision
+
+    @staticmethod
+    def _overlap_citations(
+        answer: str,
+        results: list[SearchResult],
+    ) -> list[str]:
+        """Cite only retrieved chunks with substantial informative overlap."""
+        def terms(text: str) -> set[str]:
+            return {
+                token.casefold()
+                for token in re.findall(r"[^\W_]+", text, flags=re.UNICODE)
+                if token.casefold() not in _CITATION_STOPWORDS
+                and (len(token) > 2 or token.isdigit())
+            }
+
+        answer_terms = terms(answer)
+        if not answer_terms:
+            return []
+        cited: list[str] = []
+        for result in results:
+            evidence_terms = terms(
+                result.chunk.section_title + " " + result.chunk.content
+            )
+            overlap = answer_terms & evidence_terms
+            cosine = len(overlap) / max(
+                1.0, (len(answer_terms) * len(evidence_terms)) ** 0.5
+            )
+            evidence_coverage = len(overlap) / max(1, len(evidence_terms))
+            if len(overlap) >= 3 and cosine >= 0.25 and evidence_coverage >= 0.15:
+                cited.append(result.chunk.section_id)
+        return cited
+
+    @staticmethod
+    def _strip_citation_artifacts(
+        answer: str,
+        results: list[SearchResult],
+    ) -> str:
+        """Keep source references in metadata rather than spoken customer text."""
+        for result in results:
+            evidence_id = result.chunk.section_id
+            if ":" in evidence_id:
+                answer = re.sub(
+                    rf"\[?{re.escape(evidence_id)}\]?",
+                    "",
+                    answer,
+                    flags=re.IGNORECASE,
+                )
+            else:
+                answer = re.sub(
+                    rf"\[{re.escape(evidence_id)}\]",
+                    "",
+                    answer,
+                    flags=re.IGNORECASE,
+                )
+        answer = re.sub(
+            r"\(?\s*(?:(?:source|section)\s+)?id\s*[:=]\s*"
+            r"[A-Z]{2,}(?:-[A-Z0-9]+)+\s*\)?",
+            "",
+            answer,
+            flags=re.IGNORECASE,
+        )
+        return re.sub(r"[ \t]{2,}", " ", answer).strip()
+
+    @staticmethod
+    def _must_request_order_verification(
+        message: str,
+        session: AgentSession,
+        lookup_failed: bool,
+    ) -> bool:
+        """Never trust model prose with order data until the guard verified it."""
+        guard = session.tool_guard
+        if guard is None:
+            return False
+        if lookup_failed:
+            return True
+        if not guard.unverified_order_ids:
+            return False
+        order_related = re.search(
+            r"\b(order|delivery|delivered|shipment|shipped|tracking|refund|"
+            r"replacement|parcel|item|product|status|price|amount)\b|"
+            r"ऑर्डर|डिलीवरी|पार्सल|रिफंड|वापसी|मिला|मिली|भेजा|भेजी",
+            message,
+            flags=re.IGNORECASE,
+        )
+        return bool(order_related)
+
+    @staticmethod
+    def _claims_handover(answer: str) -> bool:
+        answer = re.sub(
+            r"(?:can't|cannot|could not|wasn't able to|not able to)\s+"
+            r"(?:say|state|claim|confirm)\s+(?:that\s+)?"
+            r".{0,50}?\bticket\b.{0,30}?\b(?:created|raised|submitted|opened)\b",
+            "",
+            answer,
+            flags=re.IGNORECASE,
+        )
+        return bool(re.search(
+            r"(?:\bticket\b.{0,60}\b(?:created|raised|submitted|opened)\b|"
+            r"\b(?:created|raised|submitted|opened)\b.{0,60}\bticket\b|"
+            r"\b(?:i(?:'ve| have)? escalated|handover (?:has been|was) submitted|"
+            r"human (?:support )?(?:agent|colleague) will contact you)\b|"
+            r"टिकट.{0,60}(?:बन|बना|बनाया|बनाकर|दर्ज|भेज)|"
+            r"(?:बन|बना|बनाया|बनाकर|दर्ज|भेज).{0,60}टिकट|"
+            r"मानव सहायता.{0,50}(?:संपर्क|फोन|कॉल))",
+            answer,
+            flags=re.IGNORECASE,
+        ))
+
+    @staticmethod
+    def _infer_decision(answer: str) -> str:
+        """Fill internal decision metadata when a model omits its output tag."""
+        opening = answer[:220]
+        if ZentroMartAgent._claims_handover(answer) or re.search(
+            r"\b(?:escalat(?:e|ed|ing)|human (?:support|agent|colleague)|"
+            r"speak to (?:a )?person|connect you to)\b|"
+            r"मानव सहायता|एजेंट से बात|जोड़ सकता",
+            opening,
+            flags=re.IGNORECASE,
+        ):
+            return "escalate"
+        if re.search(
+            r"\b(?:can't|cannot|unable to|won't|do not have access|"
+            r"don't have access|not able to)\b.{0,100}\b(?:provide|share|help|confirm|"
+            r"disclose|access|identify)\b|"
+            r"नहीं बता सकता|नहीं बता सकती|साझा नहीं कर सकता|पुष्टि नहीं कर सकता",
+            opening,
+            flags=re.IGNORECASE,
+        ):
+            return "refuse"
+        clarification = re.search(
+            r"\b(?:could you (?:please )?(?:provide|share|confirm|tell)|"
+            r"please (?:provide|share|tell me)|what is your|which would you|"
+            r"do you have|may i have|i need (?:your|the)|need to know)\b|"
+            r"(?:कृपया|बताइए).{0,50}(?:ऑर्डर|नंबर|पिन|बताएं|दीजिए)|"
+            r"(?:क्या आप|कौन सा|कौन सी).{0,60}(?:बताएं|देंगे|देंगी|चाहते|चाहती)",
+            answer,
+            flags=re.IGNORECASE,
+        )
+        if clarification:
+            prior_text = answer[:clarification.start()]
+            substantive = re.search(
+                r"\d|₹|\b(?:warranty|warranties|claim|refund|return|fee|"
+                r"delivery|delivered|shipped|eligible|covered|waived|replacement|"
+                r"product|item|status|price|amount)\b|"
+                r"वारंटी|क्लेम|रिफ़ंड|रिटर्न|डिलीवरी|महीने|रुपये",
+                prior_text,
+                flags=re.IGNORECASE,
+            )
+            if not substantive:
+                return "clarify"
+        return "answer"
 
     @staticmethod
     def _sanitize_tool_calls(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -326,6 +506,11 @@ class ZentroMartAgent:
                 }
                 return result, event
             if name == "create_ticket":
+                if session.ticket_created:
+                    return (
+                        {"created": False, "error": "A handover ticket already exists for this session."},
+                        {"name": name, "created": False, "duplicate_blocked": True},
+                    )
                 result = session.tool_guard.create_ticket(**arguments)
                 return result, {
                     "name": name,

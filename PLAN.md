@@ -47,18 +47,20 @@ before work continues to the next part.
   hidden retries.
 - Acceptance: baseline, RAG, and conversation modes share one client; tool
   calls are bounded and verification values are not retained in session text.
-- Status: code complete; NVIDIA API calls wait for model, key, and the credit
-  budget clarification.
+- Status: baseline, RAG, and conversation agent implementations are present.
+  The recorded full run used `nvidia/nemotron-3.5-lightning-30b-a3b`. A later
+  provider-backed conversation rerun hit HTTP 429. The post-run tool safety
+  changes still need a full provider-backed rerun.
 
 ## Part 5 — Evaluation
 
 - Evaluate all practice questions and conversations, including ASR-like text,
   expected decisions, tool calls, and evidence IDs.
 - Report the Step 1 vs. Step 2 comparison and known failures.
-- Running the paid/credited model evaluation waits until the model and available
-  credit budget are clear.
-- Status: harness implemented in `src/zentromart/evaluation.py`; model runs are
-  pending the user's NVIDIA model and credit clarification.
+- Status: full baseline, RAG, and conversation result files exist under local
+  `outputs/final-evaluation/`. Their scores and limitations are in
+  `REPORT.md`. The full conversation scores predate the later tool-safety
+  changes; rerun the affected suite when NVIDIA Build's rate limit clears.
 
 ## Part 6 — Gnani voice and reproducible submission
 
@@ -70,10 +72,11 @@ before work continues to the next part.
   sample outputs, and an individual two-minute demo plan/video.
 - Acceptance: no keys, dataset copy, virtual environment, or real customer data
   in the submission.
-- Status: Gnani REST STT/TTS batch pipeline, install metadata, command-line
-  entry point, report draft, demo outline, and sample-output instructions are
-  implemented. Live audio/model validation and actual sample outputs await
-  the scheduled test; credentials remain local.
+- Status: Gnani STT/TTS batch flow and one end-to-end voice run completed.
+  That run lacked the relevant warranty citation and predates the latest
+  retrieval fix. The report and timed demo instructions now disclose this.
+  A grounded rerun and final video are still required; credentials remain
+  local.
 
 ## Dataset rules carried into implementation
 

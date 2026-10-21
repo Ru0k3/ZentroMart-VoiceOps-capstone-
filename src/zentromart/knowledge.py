@@ -12,13 +12,50 @@ from dataclasses import asdict, dataclass
 from math import log
 from pathlib import Path
 import re
+import unicodedata
 from typing import Iterable, Mapping
 
 
 _FRONTMATTER = re.compile(r"\A---\s*\n(.*?)\n---\s*(?:\n|\Z)", re.DOTALL)
 _SECTION = re.compile(r"^## \[([^\]]+)\]\s*(.*)$")
 _H1 = re.compile(r"^#\s+(.+?)\s*$")
-_TOKEN = re.compile(r"[^\W_]+|₹", re.UNICODE)
+_SPOKEN_DIGITS = {
+    "zero": "0", "oh": "0", "one": "1", "two": "2", "to": "2",
+    "too": "2", "three": "3", "four": "4", "for": "4",
+    "five": "5", "six": "6", "seven": "7", "eight": "8",
+    "ate": "8", "nine": "9",
+}
+_SKU_LINE = re.compile(r"(?im)^sku:\s*([A-Z]{2,})-(\d+)")
+_STOPWORDS = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "been", "being", "by",
+    "do", "does", "for", "from", "how", "i", "in", "is", "it", "me",
+    "of", "on", "or", "please", "so", "the", "this", "to", "was", "we",
+    "what", "when", "where", "which", "who", "with", "you",
+    "aur", "aap", "agar", "ek", "hai", "hain", "ho", "hoon", "is", "ka",
+    "kaise", "kar", "karein", "karke", "ke", "ki", "ko", "liye", "main",
+    "mein", "mujhe", "na", "par", "raha", "rahi", "rahe", "se", "toh", "ye",
+    "yeh", "kya", "kripya", "jawab", "simple", "dein", "dijiye", "bhi", "hi",
+    "है", "हैं", "हो", "हूँ", "का", "की", "के", "में", "से", "पर", "और",
+    "क्या", "कैसे", "कहाँ", "मुझे", "मैं", "मेरा", "मेरी", "मेरे", "यह", "ये",
+    "वह", "तो", "एक", "लिए", "कर", "करें", "करना", "रहा", "रही", "रहे",
+    "कृपया", "बताइए", "धन्यवाद",
+})
+_QUERY_SYNONYMS = {
+    "वारंटी": ("warranty", "warranties"),
+    "गारंटी": ("warranty", "warranties"),
+    "अश्योर्ड": ("assured", "warranty"),
+    "एश्योर्ड": ("assured", "warranty"),
+    "क्लेम": ("claim", "claims"),
+    "दावा": ("claim", "claims"),
+    "मरम्मत": ("repair", "service"),
+    "रिप्लेसमेंट": ("replacement",),
+    "assured": ("warranty",),
+    "warranty": ("assured",),
+}
+_WARRANTY_QUERY_TERMS = frozenset({
+    "warranty", "warranties", "claim", "claims", "assured", "repair",
+    "replacement", "service",
+})
 
 # This is a retrieval tie-breaker, not a replacement for the source hierarchy
 # in the KB guide. A stronger lexical match still ranks ahead of a weak match.
@@ -171,7 +208,29 @@ def product_catalog_chunks(
 
 
 def _tokens(text: str) -> list[str]:
-    return [token.casefold() for token in _TOKEN.findall(text)]
+    tokens: list[str] = []
+    current: list[str] = []
+    for char in text.casefold():
+        category = unicodedata.category(char)
+        if char.isalnum() or category.startswith("M"):
+            current.append(char)
+        elif char == "₹":
+            if current:
+                token = "".join(current)
+                if token not in _STOPWORDS:
+                    tokens.append(token)
+                current = []
+            tokens.append(char)
+        elif current:
+            token = "".join(current)
+            if token not in _STOPWORDS:
+                tokens.append(token)
+            current = []
+    if current:
+        token = "".join(current)
+        if token not in _STOPWORDS:
+            tokens.append(token)
+    return tokens
 
 
 class KnowledgeRetriever:
@@ -196,16 +255,35 @@ class KnowledgeRetriever:
             sum(self._lengths) / len(self._lengths) if self._lengths else 0.0
         )
         self._term_frequencies = [Counter(tokens) for tokens in self._document_tokens]
+        self._sku_by_prefix: dict[str, set[str]] = {}
+        for chunk in self.chunks:
+            match = _SKU_LINE.search(chunk.content)
+            if match:
+                prefix, digits = match.groups()
+                self._sku_by_prefix.setdefault(prefix.casefold(), set()).add(digits)
         self._document_frequency: Counter[str] = Counter()
         for frequencies in self._term_frequencies:
             self._document_frequency.update(frequencies.keys())
 
     def search(self, query: str, *, top_k: int = 5) -> list[SearchResult]:
         """Return the best matching chunks with IDs and source metadata intact."""
+        query = self._normalize_spoken_skus(query)
+        requested_skus = {
+            f"{prefix.upper()}-{digits}"
+            for prefix, digits in re.findall(r"\b([A-Z]{2,})-(\d+)\b", query, re.IGNORECASE)
+            if digits in self._sku_by_prefix.get(prefix.casefold(), set())
+        }
         query_tokens = _tokens(query)
+        original_tokens = tuple(query_tokens)
+        query_tokens.extend(
+            synonym
+            for token in original_tokens
+            for synonym in _QUERY_SYNONYMS.get(token, ())
+        )
         if not query_tokens or top_k <= 0 or not self.chunks:
             return []
 
+        warranty_intent = bool(set(query_tokens) & _WARRANTY_QUERY_TERMS)
         total_documents = len(self.chunks)
         k1, b = 1.5, 0.75
         ranked: list[tuple[float, int, SearchResult]] = []
@@ -213,6 +291,15 @@ class KnowledgeRetriever:
         for chunk, frequencies, length in zip(
             self.chunks, self._term_frequencies, self._lengths
         ):
+            sku_match = _SKU_LINE.search(chunk.content)
+            if requested_skus and chunk.doc_type.casefold() == "product":
+                chunk_sku = (
+                    f"{sku_match.group(1)}-{sku_match.group(2)}".upper()
+                    if sku_match else ""
+                )
+                if chunk_sku not in requested_skus:
+                    continue
+
             score = 0.0
             for term in query_tokens:
                 term_frequency = frequencies.get(term, 0)
@@ -230,10 +317,46 @@ class KnowledgeRetriever:
                     term_frequency * (k1 + 1.0) / denominator
                 )
 
+            # Give a direct section-title phrase a useful advantage over
+            # repeated generic catalog fields such as ``assured = False``.
+            title_tokens = _tokens(chunk.section_title)
+            query_bigrams = set(zip(query_tokens, query_tokens[1:]))
+            title_bigrams = set(zip(title_tokens, title_tokens[1:]))
+            score += 5.0 * len(query_bigrams & title_bigrams)
+
+            # A normalized exact SKU is decisive product evidence.
+            if sku_match and f"{sku_match.group(1)}-{sku_match.group(2)}".casefold() in query.casefold():
+                score += 20.0
+
+            # Warranty and claim questions must see the Assured policy that
+            # defines the app's My Orders claim path, including when speech
+            # recognition omits the catalog SKU itself.
+            if warranty_intent and chunk.section_id == "WAR-2":
+                score += 30.0
+
             if score > 0.0:
                 priority = _SOURCE_PRIORITY.get(chunk.doc_type.casefold(), -1)
                 ranked.append((score, priority, SearchResult(chunk, score)))
 
         ranked.sort(key=lambda item: (-item[0], -item[1], item[2].chunk.section_id))
         return [result for _, _, result in ranked[:top_k]]
+
+    def _normalize_spoken_skus(self, query: str) -> str:
+        """Convert recognized spoken catalog IDs (``ele zero zero one to``)."""
+        for prefix, sku_numbers in self._sku_by_prefix.items():
+            pattern = re.compile(
+                rf"\b{re.escape(prefix)}\b(?:[\s-]+(?:zero|oh|one|two|to|too|three|four|for|five|six|seven|eight|ate|nine|[0-9]+)){{1,8}}",
+                re.IGNORECASE,
+            )
+
+            def replace(match: re.Match[str]) -> str:
+                words = re.findall(r"[a-z]+|[0-9]+", match.group(0).casefold())
+                digits = "".join(_SPOKEN_DIGITS.get(word, word) for word in words[1:])
+                padded = digits.zfill(max((len(value) for value in sku_numbers), default=0))
+                if padded in sku_numbers:
+                    return f"{prefix.upper()}-{padded}"
+                return match.group(0)
+
+            query = pattern.sub(replace, query)
+        return query
 

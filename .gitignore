@@ -10,6 +10,7 @@ __pycache__/
 .mypy_cache/
 build/
 dist/
+*.egg-info/
 
 # Capstone data is synthetic but must not be bundled in the submission.
 Capstone_Project_Dataset_FTTT_2026.zip
